@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.kaoyanassistant.core.AIProvider
 import com.example.kaoyanassistant.core.APIConfig
 import com.example.kaoyanassistant.core.ConfigManager
+import com.example.kaoyanassistant.core.MultimodalMode
 import com.example.kaoyanassistant.core.UserInfo
 import com.example.kaoyanassistant.core.UserManager
 import kotlinx.coroutines.flow.*
@@ -18,6 +19,11 @@ data class SettingsUiState(
     val currentProvider: AIProvider = AIProvider.DeepSeek,
     val apiConfigs: Map<AIProvider, APIConfig> = emptyMap(),
     val customConfigs: Map<String, APIConfig> = emptyMap(),
+    val multimodalMode: MultimodalMode = MultimodalMode.Single,
+    val multimodalVisionProvider: AIProvider = AIProvider.DeepSeek,
+    val multimodalReasoningProvider: AIProvider = AIProvider.DeepSeek,
+    val multimodalVisionCustomConfig: APIConfig = APIConfig(),
+    val multimodalReasoningCustomConfig: APIConfig = APIConfig(),
     val currentUser: UserInfo? = null,
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
@@ -40,6 +46,36 @@ class SettingsViewModel(
         viewModelScope.launch {
             configManager.currentProviderFlow.collect { provider ->
                 _uiState.update { it.copy(currentProvider = provider) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.multimodalModeFlow.collect { mode ->
+                _uiState.update { it.copy(multimodalMode = mode) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.multimodalVisionProviderFlow.collect { provider ->
+                _uiState.update { it.copy(multimodalVisionProvider = provider) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.multimodalReasoningProviderFlow.collect { provider ->
+                _uiState.update { it.copy(multimodalReasoningProvider = provider) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.multimodalVisionCustomConfigFlow.collect { config ->
+                _uiState.update { it.copy(multimodalVisionCustomConfig = config) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.multimodalReasoningCustomConfigFlow.collect { config ->
+                _uiState.update { it.copy(multimodalReasoningCustomConfig = config) }
             }
         }
 
@@ -83,6 +119,48 @@ class SettingsViewModel(
     fun setCurrentProvider(provider: AIProvider) {
         viewModelScope.launch {
             configManager.setCurrentProvider(provider)
+        }
+    }
+
+    fun setMultimodalMode(mode: MultimodalMode) {
+        viewModelScope.launch {
+            configManager.setMultimodalMode(mode)
+        }
+    }
+
+    fun setMultimodalVisionProvider(provider: AIProvider) {
+        viewModelScope.launch {
+            configManager.setMultimodalVisionProvider(provider)
+        }
+    }
+
+    fun setMultimodalReasoningProvider(provider: AIProvider) {
+        viewModelScope.launch {
+            configManager.setMultimodalReasoningProvider(provider)
+        }
+    }
+
+    fun updateMultimodalVisionCustomConfig(config: APIConfig) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            try {
+                configManager.setMultimodalVisionCustomConfig(config)
+                _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message, isSaving = false) }
+            }
+        }
+    }
+
+    fun updateMultimodalReasoningCustomConfig(config: APIConfig) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            try {
+                configManager.setMultimodalReasoningCustomConfig(config)
+                _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message, isSaving = false) }
+            }
         }
     }
 
@@ -176,6 +254,7 @@ class SettingsViewModel(
             AIProvider.Claude -> "Claude"
             AIProvider.DeepSeek -> "DeepSeek"
             AIProvider.Qwen -> "通义千问"
+            AIProvider.Doubao -> "豆包"
             AIProvider.Custom -> "自定义"
         }
     }

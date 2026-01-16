@@ -49,12 +49,13 @@ fun ChatScreen(
     var inputText by remember { mutableStateOf("") }
     var showImageMenu by remember { mutableStateOf(false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            viewModel.sendImageMessage(uri)
+            pendingImageUri = uri
         }
     }
 
@@ -63,7 +64,7 @@ fun ChatScreen(
     ) { success ->
         val uri = pendingCameraUri
         if (success && uri != null) {
-            viewModel.sendImageMessage(uri)
+            pendingImageUri = uri
         }
         pendingCameraUri = null
     }
@@ -105,10 +106,35 @@ fun ChatScreen(
         }
     }
 
+    val canSend = inputText.isNotBlank() || pendingImageUri != null
+    val sendCurrentMessage: () -> Unit = {
+        if (!uiState.isLoading && canSend) {
+            val imageToSend = pendingImageUri
+            if (imageToSend != null) {
+                viewModel.sendMessageWithImage(imageToSend, inputText)
+            } else {
+                viewModel.sendMessage(inputText)
+            }
+            inputText = ""
+            pendingImageUri = null
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("考研AI助手") },
+                title = {
+                    Column {
+                        Text("考研AI助手")
+                        uiState.activeModelLabel?.let { label ->
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
                 actions = {
                     // 上下文使用进度
                     if (uiState.contextUsageRatio > 0) {
@@ -219,113 +245,135 @@ fun ChatScreen(
                     .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom)),
                 tonalElevation = 2.dp
             ) {
-                Row(
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Box {
-                        IconButton(
-                            onClick = { showImageMenu = true },
-                            enabled = !uiState.isLoading
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (pendingImageUri != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                Icons.Default.AddPhotoAlternate,
-                                contentDescription = "上传图片"
+                            AsyncImage(
+                                model = pendingImageUri,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
-                        }
-                        DropdownMenu(
-                            expanded = showImageMenu,
-                            onDismissRequest = { showImageMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("从图库选择") },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.PhotoLibrary,
-                                        contentDescription = null
-                                    )
-                                },
-                                onClick = {
-                                    showImageMenu = false
-                                    galleryLauncher.launch("image/*")
-                                }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "已选择图片",
+                                style = MaterialTheme.typography.bodySmall
                             )
-                            DropdownMenuItem(
-                                text = { Text("拍照") },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.PhotoCamera,
-                                        contentDescription = null
-                                    )
-                                },
-                                onClick = {
-                                    showImageMenu = false
-                                    val hasPermission = ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.CAMERA
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (hasPermission) {
-                                        launchCamera()
-                                    } else {
-                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                                    }
-                                }
-                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(onClick = { pendingImageUri = null }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "移除图片"
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("输入问题...") },
-                        maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                if (inputText.isNotBlank() && !uiState.isLoading) {
-                                    viewModel.sendMessage(inputText)
-                                    inputText = ""
-                                }
+                    Row(
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Box {
+                            IconButton(
+                                onClick = { showImageMenu = true },
+                                enabled = !uiState.isLoading
+                            ) {
+                                Icon(
+                                    Icons.Default.AddPhotoAlternate,
+                                    contentDescription = "上传图片"
+                                )
                             }
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // 发送/取消按钮
-                    if (uiState.isLoading) {
-                        IconButton(
-                            onClick = { viewModel.cancelRequest() }
-                        ) {
-                            Icon(
-                                Icons.Default.Stop,
-                                contentDescription = "取消",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            DropdownMenu(
+                                expanded = showImageMenu,
+                                onDismissRequest = { showImageMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("从图库选择") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.PhotoLibrary,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showImageMenu = false
+                                        galleryLauncher.launch("image/*")
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("拍照") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.PhotoCamera,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showImageMenu = false
+                                        val hasPermission = ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.CAMERA
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                        if (hasPermission) {
+                                            launchCamera()
+                                        } else {
+                                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                        }
+                                    }
+                                )
+                            }
                         }
-                    } else {
-                        IconButton(
-                            onClick = {
-                                if (inputText.isNotBlank()) {
-                                    viewModel.sendMessage(inputText)
-                                    inputText = ""
-                                }
-                            },
-                            enabled = inputText.isNotBlank()
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "发送",
-                                tint = if (inputText.isNotBlank())
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("输入问题...") },
+                            maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = { sendCurrentMessage() }
                             )
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // 发送/取消按钮
+                        if (uiState.isLoading) {
+                            IconButton(
+                                onClick = { viewModel.cancelRequest() }
+                            ) {
+                                Icon(
+                                    Icons.Default.Stop,
+                                    contentDescription = "取消",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        } else {
+                            IconButton(
+                                onClick = sendCurrentMessage,
+                                enabled = canSend
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "发送",
+                                    tint = if (canSend)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                )
+                            }
                         }
                     }
                 }

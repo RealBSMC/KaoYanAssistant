@@ -20,7 +20,16 @@ enum class AIProvider {
     Claude,
     DeepSeek,
     Qwen,      // 通义千问
+    Doubao,    // 豆包
     Custom     // 自定义API
+}
+
+/**
+ * 多模态处理模式
+ */
+enum class MultimodalMode {
+    Single, // 单模型
+    Split   // 图片模型+推理模型
 }
 
 /**
@@ -53,6 +62,11 @@ class ConfigManager private constructor(private val context: Context) {
         // Preference Keys
         private val CURRENT_PROVIDER = stringPreferencesKey("current_provider")
         private val DOCUMENT_STORAGE_PATH = stringPreferencesKey("document_storage_path")
+        private val MULTIMODAL_MODE = stringPreferencesKey("multimodal_mode")
+        private val MULTIMODAL_VISION_PROVIDER = stringPreferencesKey("multimodal_vision_provider")
+        private val MULTIMODAL_REASONING_PROVIDER = stringPreferencesKey("multimodal_reasoning_provider")
+        private val MULTIMODAL_VISION_CUSTOM_CONFIG = stringPreferencesKey("multimodal_vision_custom_config")
+        private val MULTIMODAL_REASONING_CUSTOM_CONFIG = stringPreferencesKey("multimodal_reasoning_custom_config")
 
         // API配置Keys（按服务商存储）
         private fun apiConfigKey(provider: AIProvider) = stringPreferencesKey("api_config_${provider.name}")
@@ -88,6 +102,10 @@ class ConfigManager private constructor(private val context: Context) {
             apiUrl = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
             model = "qwen-turbo"
         ),
+        AIProvider.Doubao to APIConfig(
+            apiUrl = "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+            model = "doubao-seed-1-8-251228"
+        ),
         AIProvider.Custom to APIConfig()
     )
 
@@ -109,6 +127,123 @@ class ConfigManager private constructor(private val context: Context) {
     suspend fun setCurrentProvider(provider: AIProvider) {
         context.dataStore.edit { preferences ->
             preferences[CURRENT_PROVIDER] = provider.name
+        }
+    }
+
+    /**
+     * 获取多模态模式
+     */
+    val multimodalModeFlow: Flow<MultimodalMode> = context.dataStore.data.map { preferences ->
+        val modeName = preferences[MULTIMODAL_MODE] ?: MultimodalMode.Single.name
+        try {
+            MultimodalMode.valueOf(modeName)
+        } catch (e: IllegalArgumentException) {
+            MultimodalMode.Single
+        }
+    }
+
+    /**
+     * 设置多模态模式
+     */
+    suspend fun setMultimodalMode(mode: MultimodalMode) {
+        context.dataStore.edit { preferences ->
+            preferences[MULTIMODAL_MODE] = mode.name
+        }
+    }
+
+    /**
+     * 获取图片理解服务商
+     */
+    val multimodalVisionProviderFlow: Flow<AIProvider> = context.dataStore.data.map { preferences ->
+        val providerName = preferences[MULTIMODAL_VISION_PROVIDER]
+            ?: preferences[CURRENT_PROVIDER]
+            ?: AIProvider.DeepSeek.name
+        try {
+            AIProvider.valueOf(providerName)
+        } catch (e: IllegalArgumentException) {
+            AIProvider.DeepSeek
+        }
+    }
+
+    /**
+     * 设置图片理解服务商
+     */
+    suspend fun setMultimodalVisionProvider(provider: AIProvider) {
+        context.dataStore.edit { preferences ->
+            preferences[MULTIMODAL_VISION_PROVIDER] = provider.name
+        }
+    }
+
+    /**
+     * 获取图片模型自定义配置
+     */
+    val multimodalVisionCustomConfigFlow: Flow<APIConfig> = context.dataStore.data.map { preferences ->
+        val configJson = preferences[MULTIMODAL_VISION_CUSTOM_CONFIG]
+        if (configJson != null) {
+            try {
+                json.decodeFromString<APIConfig>(configJson)
+            } catch (e: Exception) {
+                APIConfig()
+            }
+        } else {
+            APIConfig()
+        }
+    }
+
+    /**
+     * 设置图片模型自定义配置
+     */
+    suspend fun setMultimodalVisionCustomConfig(config: APIConfig) {
+        context.dataStore.edit { preferences ->
+            preferences[MULTIMODAL_VISION_CUSTOM_CONFIG] = json.encodeToString(config)
+        }
+    }
+
+    /**
+     * 获取推理服务商
+     */
+    val multimodalReasoningProviderFlow: Flow<AIProvider> = context.dataStore.data.map { preferences ->
+        val providerName = preferences[MULTIMODAL_REASONING_PROVIDER]
+            ?: preferences[CURRENT_PROVIDER]
+            ?: AIProvider.DeepSeek.name
+        try {
+            AIProvider.valueOf(providerName)
+        } catch (e: IllegalArgumentException) {
+            AIProvider.DeepSeek
+        }
+    }
+
+    /**
+     * 获取推理模型自定义配置
+     */
+    val multimodalReasoningCustomConfigFlow: Flow<APIConfig> = context.dataStore.data.map { preferences ->
+        val configJson = preferences[MULTIMODAL_REASONING_CUSTOM_CONFIG]
+        if (configJson != null) {
+            try {
+                json.decodeFromString<APIConfig>(configJson)
+            } catch (e: Exception) {
+                APIConfig()
+            }
+        } else {
+            APIConfig()
+        }
+    }
+
+    /**
+     * 设置推理模型自定义配置
+     */
+    suspend fun setMultimodalReasoningCustomConfig(config: APIConfig) {
+        context.dataStore.edit { preferences ->
+            preferences[MULTIMODAL_REASONING_CUSTOM_CONFIG] = json.encodeToString(config)
+        }
+    }
+
+    /**
+     * 设置推理服务商
+     */
+    suspend fun setMultimodalReasoningProvider(provider: AIProvider) {
+        context.dataStore.edit { preferences ->
+            preferences[MULTIMODAL_REASONING_PROVIDER] = provider.name
         }
     }
 
@@ -242,5 +377,40 @@ class ConfigManager private constructor(private val context: Context) {
      */
     suspend fun getCurrentProvider(): AIProvider {
         return currentProviderFlow.first()
+    }
+
+    /**
+     * 同步获取多模态模式
+     */
+    suspend fun getMultimodalMode(): MultimodalMode {
+        return multimodalModeFlow.first()
+    }
+
+    /**
+     * 同步获取图片理解服务商
+     */
+    suspend fun getMultimodalVisionProvider(): AIProvider {
+        return multimodalVisionProviderFlow.first()
+    }
+
+    /**
+     * 同步获取推理服务商
+     */
+    suspend fun getMultimodalReasoningProvider(): AIProvider {
+        return multimodalReasoningProviderFlow.first()
+    }
+
+    /**
+     * 同步获取图片模型自定义配置
+     */
+    suspend fun getMultimodalVisionCustomConfig(): APIConfig {
+        return multimodalVisionCustomConfigFlow.first()
+    }
+
+    /**
+     * 同步获取推理模型自定义配置
+     */
+    suspend fun getMultimodalReasoningCustomConfig(): APIConfig {
+        return multimodalReasoningCustomConfigFlow.first()
     }
 }

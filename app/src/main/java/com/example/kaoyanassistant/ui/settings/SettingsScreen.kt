@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.example.kaoyanassistant.core.AIProvider
 import com.example.kaoyanassistant.core.APIConfig
+import com.example.kaoyanassistant.core.MultimodalMode
 import com.example.kaoyanassistant.core.UserInfo
 
 /**
@@ -37,6 +38,8 @@ fun SettingsScreen(
     var selectedProvider by remember { mutableStateOf(uiState.currentProvider) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showUserInfoDialog by remember { mutableStateOf(false) }
+    var showVisionProviderMenu by remember { mutableStateOf(false) }
+    var showReasoningProviderMenu by remember { mutableStateOf(false) }
 
     // 保存成功提示
     LaunchedEffect(uiState.saveSuccess) {
@@ -130,6 +133,179 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            // 多模态模式
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "多模态模式",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.setMultimodalMode(MultimodalMode.Single) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = uiState.multimodalMode == MultimodalMode.Single,
+                                onClick = { viewModel.setMultimodalMode(MultimodalMode.Single) }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "单模型",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "上传图片时直接由当前模型处理",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.setMultimodalMode(MultimodalMode.Split) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = uiState.multimodalMode == MultimodalMode.Split,
+                                onClick = { viewModel.setMultimodalMode(MultimodalMode.Split) }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "双模型协同",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Text(
+                                    text = "先用图片模型解析，再用推理模型生成回答",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+
+                        if (uiState.multimodalMode == MultimodalMode.Split) {
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "图片模型",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Box {
+                                    OutlinedButton(onClick = { showVisionProviderMenu = true }) {
+                                        Text(viewModel.getProviderDisplayName(uiState.multimodalVisionProvider))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showVisionProviderMenu,
+                                        onDismissRequest = { showVisionProviderMenu = false }
+                                    ) {
+                                        AIProvider.entries.forEach { provider ->
+                                            DropdownMenuItem(
+                                                text = { Text(viewModel.getProviderDisplayName(provider)) },
+                                                onClick = {
+                                                    showVisionProviderMenu = false
+                                                    viewModel.setMultimodalVisionProvider(provider)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "推理模型",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Box {
+                                    OutlinedButton(onClick = { showReasoningProviderMenu = true }) {
+                                        Text(viewModel.getProviderDisplayName(uiState.multimodalReasoningProvider))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showReasoningProviderMenu,
+                                        onDismissRequest = { showReasoningProviderMenu = false }
+                                    ) {
+                                        AIProvider.entries.forEach { provider ->
+                                            DropdownMenuItem(
+                                                text = { Text(viewModel.getProviderDisplayName(provider)) },
+                                                onClick = {
+                                                    showReasoningProviderMenu = false
+                                                    viewModel.setMultimodalReasoningProvider(provider)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "提示：请确保图片模型与推理模型都已在上方配置好API信息。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (uiState.multimodalMode == MultimodalMode.Split &&
+                uiState.multimodalVisionProvider == AIProvider.Custom
+            ) {
+                item {
+                    APIConfigCard(
+                        provider = AIProvider.Custom,
+                        config = uiState.multimodalVisionCustomConfig,
+                        providerName = "图片模型(自定义)",
+                        onSave = { config ->
+                            viewModel.updateMultimodalVisionCustomConfig(config)
+                        },
+                        isSaving = uiState.isSaving
+                    )
+                }
+            }
+
+            if (uiState.multimodalMode == MultimodalMode.Split &&
+                uiState.multimodalReasoningProvider == AIProvider.Custom
+            ) {
+                item {
+                    APIConfigCard(
+                        provider = AIProvider.Custom,
+                        config = uiState.multimodalReasoningCustomConfig,
+                        providerName = "推理模型(自定义)",
+                        onSave = { config ->
+                            viewModel.updateMultimodalReasoningCustomConfig(config)
+                        },
+                        isSaving = uiState.isSaving
+                    )
                 }
             }
 
@@ -610,6 +786,7 @@ private fun getProviderDescription(provider: AIProvider): String {
         AIProvider.Claude -> "Claude 3 Opus, Sonnet等模型"
         AIProvider.DeepSeek -> "DeepSeek Chat, DeepSeek Coder"
         AIProvider.Qwen -> "通义千问系列模型"
+        AIProvider.Doubao -> "豆包系列模型"
         AIProvider.Custom -> "自定义OpenAI兼容API"
     }
 }
@@ -620,6 +797,7 @@ private fun getDefaultApiUrl(provider: AIProvider): String {
         AIProvider.Claude -> "https://api.anthropic.com/v1/messages"
         AIProvider.DeepSeek -> "https://api.deepseek.com/v1/chat/completions"
         AIProvider.Qwen -> "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+        AIProvider.Doubao -> "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
         AIProvider.Custom -> ""
     }
 }
@@ -630,6 +808,7 @@ private fun getDefaultModel(provider: AIProvider): String {
         AIProvider.Claude -> "claude-3-opus-20240229"
         AIProvider.DeepSeek -> "deepseek-chat"
         AIProvider.Qwen -> "qwen-turbo"
+        AIProvider.Doubao -> "doubao-pro-32k"
         AIProvider.Custom -> ""
     }
 }
@@ -638,8 +817,9 @@ private fun getModelHint(provider: AIProvider): String {
     return when (provider) {
         AIProvider.OpenAI -> "可选: gpt-4, gpt-4-turbo, gpt-3.5-turbo"
         AIProvider.Claude -> "可选: claude-3-opus, claude-3-sonnet, claude-3-haiku"
-        AIProvider.DeepSeek -> "可选: deepseek-chat, deepseek-coder"
+        AIProvider.DeepSeek -> "可选: deepseek-chat, deepseek-reasoner"
         AIProvider.Qwen -> "可选: qwen-turbo, qwen-plus, qwen-max"
+        AIProvider.Doubao -> "可选: doubao-pro-32k, doubao-lite-4k"
         AIProvider.Custom -> "输入自定义模型名称"
     }
 }

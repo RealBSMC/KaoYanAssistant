@@ -97,15 +97,16 @@ class AIService(private val configManager: ConfigManager) {
         config: APIConfig,
         provider: AIProvider
     ) {
-        _responseState.value = AIResponseState.Loading
+        sendMessage(Message(MessageRole.User, message), context, config, provider)
+    }
 
-        try {
-            val request = createRequest(message, context, emptyList(), config, provider)
-            sendStreamRequest(request, provider)
-        } catch (e: Exception) {
-            Logger.error("AIService", "发送消息失败: ${e.message}")
-            _responseState.value = AIResponseState.Error(e.message ?: "未知错误")
-        }
+    suspend fun sendMessage(
+        message: Message,
+        context: List<Message> = emptyList(),
+        config: APIConfig,
+        provider: AIProvider
+    ) {
+        sendMessageInternal(message, context, emptyList(), config, provider)
     }
 
     /**
@@ -115,6 +116,32 @@ class AIService(private val configManager: ConfigManager) {
         message: String,
         documentContents: List<String>,
         context: List<Message> = emptyList(),
+        config: APIConfig,
+        provider: AIProvider
+    ) {
+        sendMessageWithDocuments(
+            Message(MessageRole.User, message),
+            documentContents,
+            context,
+            config,
+            provider
+        )
+    }
+
+    suspend fun sendMessageWithDocuments(
+        message: Message,
+        documentContents: List<String>,
+        context: List<Message> = emptyList(),
+        config: APIConfig,
+        provider: AIProvider
+    ) {
+        sendMessageInternal(message, context, documentContents, config, provider)
+    }
+
+    private suspend fun sendMessageInternal(
+        message: Message,
+        context: List<Message>,
+        documentContents: List<String>,
         config: APIConfig,
         provider: AIProvider
     ) {
@@ -149,7 +176,7 @@ class AIService(private val configManager: ConfigManager) {
      * 创建HTTP请求
      */
     private fun createRequest(
-        message: String,
+        message: Message,
         context: List<Message>,
         documents: List<String>,
         config: APIConfig,
@@ -187,7 +214,7 @@ class AIService(private val configManager: ConfigManager) {
      * 创建请求体
      */
     private fun createRequestBody(
-        message: String,
+        message: Message,
         context: List<Message>,
         documents: List<String>,
         config: APIConfig,
@@ -196,15 +223,21 @@ class AIService(private val configManager: ConfigManager) {
         // 构建完整消息，包含文档内容
         val fullMessage = if (documents.isNotEmpty()) {
             val docsContent = documents.joinToString("\n\n---\n\n") { "参考资料：\n$it" }
-            "$docsContent\n\n用户问题：$message"
+            "$docsContent\n\n用户问题：${message.content}"
         } else {
+            message.content
+        }
+
+        val messageForRequest = if (fullMessage == message.content) {
             message
+        } else {
+            message.copy(content = fullMessage)
         }
 
         return when (provider) {
-            AIProvider.Claude -> createClaudeRequestBody(fullMessage, context, config)
-            AIProvider.Qwen -> createQwenRequestBody(fullMessage, context, config)
-            else -> createOpenAICompatibleRequestBody(fullMessage, context, config)
+            AIProvider.Claude -> createClaudeRequestBody(messageForRequest, context, config)
+            AIProvider.Qwen -> createQwenRequestBody(messageForRequest, context, config)
+            else -> createOpenAICompatibleRequestBody(messageForRequest, context, config)
         }
     }
 
@@ -212,7 +245,7 @@ class AIService(private val configManager: ConfigManager) {
      * 创建OpenAI兼容格式的请求体（OpenAI、DeepSeek、Custom）
      */
     private fun createOpenAICompatibleRequestBody(
-        message: String,
+        message: Message,
         context: List<Message>,
         config: APIConfig
     ): String {
@@ -227,7 +260,7 @@ class AIService(private val configManager: ConfigManager) {
         }
 
         // 添加当前消息
-        messages.add(mapOf("role" to "user", "content" to message))
+        messages.add(createOpenAIMessage(message))
 
         val requestBody = mapOf(
             "model" to config.model,
@@ -276,7 +309,7 @@ class AIService(private val configManager: ConfigManager) {
      * 创建Claude格式的请求体
      */
     private fun createClaudeRequestBody(
-        message: String,
+        message: Message,
         context: List<Message>,
         config: APIConfig
     ): String {
@@ -290,7 +323,7 @@ class AIService(private val configManager: ConfigManager) {
         }
 
         // 添加当前消息
-        messages.add(mapOf("role" to "user", "content" to message))
+        messages.add(createClaudeMessage(message))
 
         val requestBody = mapOf(
             "model" to config.model,
@@ -342,7 +375,7 @@ class AIService(private val configManager: ConfigManager) {
      * 创建通义千问格式的请求体
      */
     private fun createQwenRequestBody(
-        message: String,
+        message: Message,
         context: List<Message>,
         config: APIConfig
     ): String {
@@ -357,7 +390,7 @@ class AIService(private val configManager: ConfigManager) {
         }
 
         // 添加当前消息
-        messages.add(mapOf("role" to "user", "content" to message))
+        messages.add(createQwenMessage(message))
 
         val requestBody = mapOf(
             "model" to config.model,
