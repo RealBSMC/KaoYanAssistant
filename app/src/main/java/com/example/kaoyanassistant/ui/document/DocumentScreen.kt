@@ -1,6 +1,9 @@
 package com.example.kaoyanassistant.ui.document
 
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -9,7 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.kaoyanassistant.services.DocumentInfo
 import com.example.kaoyanassistant.services.DocumentType
+import com.example.kaoyanassistant.services.RagStage
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -36,6 +42,7 @@ fun DocumentScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // 文件选择器
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -44,7 +51,7 @@ fun DocumentScreen(
         uris.forEach { uri ->
             // 获取真实路径并导入
             context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                val fileName = uri.lastPathSegment ?: "unknown"
+                val fileName = resolveDisplayName(context, uri)
                 val tempFile = java.io.File(context.cacheDir, fileName)
                 tempFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
@@ -56,6 +63,13 @@ fun DocumentScreen(
 
     var showCategoryDialog by remember { mutableStateOf(false) }
     var selectedDocForCategory by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(uiState.lastIndexSummary) {
+        uiState.lastIndexSummary?.let { summary ->
+            snackbarHostState.showSnackbar(summary)
+            viewModel.clearIndexSummary()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -90,6 +104,7 @@ fun DocumentScreen(
                 }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
@@ -111,6 +126,98 @@ fun DocumentScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            uiState.error?.let { error ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Error,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = error,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        TextButton(onClick = { viewModel.clearError() }) {
+                            Text("关闭", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+            }
+
+            uiState.ragIndexing?.let { indexing ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "正在构建索引：${indexing.documentName}",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "当前步骤：${ragStageLabel(indexing.stage)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (indexing.total > 0) {
+                            LinearProgressIndicator(
+                                progress = { (indexing.current.toFloat() / indexing.total).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "进度 ${indexing.current}/${indexing.total}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (indexing.message.isNotBlank()) {
+                            Text(
+                                text = indexing.message,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (indexing.processedTokens > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "已消耗约 ${indexing.processedTokens} tokens",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                        if (indexing.stage == com.example.kaoyanassistant.services.RagStage.Ocr &&
+                            indexing.total > 0
+                        ) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "图片识别会分 ${indexing.total} 次上传，请注意token消耗",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+
             // 搜索栏
             OutlinedTextField(
                 value = uiState.searchQuery,
@@ -194,6 +301,7 @@ fun DocumentScreen(
                         DocumentItem(
                             document = document,
                             isSelected = document.id in uiState.selectedDocumentIds,
+                            indexing = uiState.ragIndexing?.takeIf { it.documentId == document.id },
                             onToggleSelection = { viewModel.toggleDocumentSelection(document.id) },
                             onDelete = { viewModel.removeDocument(document.id) },
                             onChangeCategory = {
@@ -243,6 +351,7 @@ fun DocumentScreen(
 fun DocumentItem(
     document: DocumentInfo,
     isSelected: Boolean,
+    indexing: RagIndexUiState?,
     onToggleSelection: () -> Unit,
     onDelete: () -> Unit,
     onChangeCategory: () -> Unit
@@ -261,82 +370,161 @@ fun DocumentItem(
                 MaterialTheme.colorScheme.surface
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(12.dp)
         ) {
-            // 选择框
-            Checkbox(
-                checked = isSelected,
-                onCheckedChange = { onToggleSelection() }
-            )
-
-            // 文档图标
-            Icon(
-                imageVector = when (document.type) {
-                    DocumentType.PlainText -> Icons.Default.Description
-                    DocumentType.Markdown -> Icons.Default.Article
-                    DocumentType.PDF -> Icons.Default.PictureAsPdf
-                    DocumentType.Word -> Icons.Default.Description
-                    DocumentType.Image -> Icons.Default.Image
-                    DocumentType.Unknown -> Icons.Default.InsertDriveFile
-                },
-                contentDescription = null,
-                modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .size(32.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            // 文档信息
-            Column(
-                modifier = Modifier.weight(1f)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = document.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                // 选择框
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelection() }
                 )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+
+                // 文档图标
+                Icon(
+                    imageVector = when (document.type) {
+                        DocumentType.PlainText -> Icons.Default.Description
+                        DocumentType.Markdown -> Icons.AutoMirrored.Filled.Article
+                        DocumentType.PDF -> Icons.Default.PictureAsPdf
+                        DocumentType.Word -> Icons.Default.Description
+                        DocumentType.Image -> Icons.Default.Image
+                        DocumentType.Unknown -> Icons.AutoMirrored.Filled.InsertDriveFile
+                    },
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp)
+                        .size(32.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+
+                // 文档信息
+                Column(
+                    modifier = Modifier.weight(1f)
                 ) {
-                    AssistChip(
-                        onClick = onChangeCategory,
-                        label = { Text(document.category, style = MaterialTheme.typography.labelSmall) },
-                        modifier = Modifier.height(24.dp)
-                    )
                     Text(
-                        text = dateFormat.format(Date(document.importTime)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        text = document.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AssistChip(
+                            onClick = onChangeCategory,
+                            label = { Text(document.category, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.height(24.dp)
+                        )
+                        Text(
+                            text = dateFormat.format(Date(document.importTime)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                // 更多操作
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("删除") },
+                            onClick = {
+                                showMenu = false
+                                onDelete()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Delete, contentDescription = null)
+                            }
+                        )
+                    }
                 }
             }
 
-            // 更多操作
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "更多")
+            if (indexing != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "处理进度：${ragStageLabel(indexing.stage)}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                if (indexing.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { (indexing.current.toFloat() / indexing.total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "进度 ${indexing.current}/${indexing.total}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("删除") },
-                        onClick = {
-                            showMenu = false
-                            onDelete()
-                        },
-                        leadingIcon = {
-                            Icon(Icons.Default.Delete, contentDescription = null)
-                        }
+                if (indexing.message.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = indexing.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
                 }
             }
         }
+    }
+}
+
+private fun ragStageLabel(stage: RagStage): String {
+    return when (stage) {
+        RagStage.Preparing -> "准备中"
+        RagStage.Ocr -> "OCR识别"
+        RagStage.Chunking -> "切分内容"
+        RagStage.Vectorizing -> "生成向量"
+        RagStage.Saving -> "保存索引"
+        RagStage.Completed -> "完成"
+        RagStage.Error -> "出错"
+    }
+}
+
+private fun resolveDisplayName(context: Context, uri: Uri): String {
+    val resolver = context.contentResolver
+    val nameFromProvider = runCatching {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0 && cursor.moveToFirst()) {
+                    cursor.getString(nameIndex)
+                } else {
+                    null
+                }
+            }
+    }.getOrNull()
+
+    val fallbackBase = "document_${System.currentTimeMillis()}"
+    val rawName = (nameFromProvider?.takeIf { it.isNotBlank() }
+        ?: uri.lastPathSegment
+        ?: fallbackBase)
+        .replace("/", "_")
+        .replace("\\", "_")
+
+    if (rawName.contains('.')) return rawName
+
+    val mimeType = resolver.getType(uri)
+    val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+    return if (!extension.isNullOrBlank()) {
+        "$rawName.$extension"
+    } else {
+        rawName
     }
 }

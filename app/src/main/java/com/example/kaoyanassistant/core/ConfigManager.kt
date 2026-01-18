@@ -17,6 +17,7 @@ import kotlinx.serialization.json.Json
  */
 enum class AIProvider {
     OpenAI,
+    OpenRouter,
     Claude,
     DeepSeek,
     Qwen,      // 通义千问
@@ -33,6 +34,14 @@ enum class MultimodalMode {
 }
 
 /**
+ * 向量模型模式
+ */
+enum class EmbeddingMode {
+    LocalPreferred, // 本地优先，失败自动回退远程
+    RemoteOnly      // 仅远程
+}
+
+/**
  * API配置数据类
  * 对应Qt版本的APIConfig结构体
  */
@@ -44,6 +53,13 @@ data class APIConfig(
     val enabled: Boolean = false,
     val maxContextTokens: Int = 8000,
     val keepRecentMessages: Int = 10
+)
+
+@Serializable
+data class EmbeddingConfig(
+    val apiUrl: String = "",
+    val apiKey: String = "",
+    val model: String = ""
 )
 
 /**
@@ -67,6 +83,8 @@ class ConfigManager private constructor(private val context: Context) {
         private val MULTIMODAL_REASONING_PROVIDER = stringPreferencesKey("multimodal_reasoning_provider")
         private val MULTIMODAL_VISION_CUSTOM_CONFIG = stringPreferencesKey("multimodal_vision_custom_config")
         private val MULTIMODAL_REASONING_CUSTOM_CONFIG = stringPreferencesKey("multimodal_reasoning_custom_config")
+        private val EMBEDDING_CONFIG = stringPreferencesKey("embedding_config")
+        private val EMBEDDING_MODE = stringPreferencesKey("embedding_mode")
 
         // API配置Keys（按服务商存储）
         private fun apiConfigKey(provider: AIProvider) = stringPreferencesKey("api_config_${provider.name}")
@@ -90,6 +108,10 @@ class ConfigManager private constructor(private val context: Context) {
             apiUrl = "https://api.openai.com/v1/chat/completions",
             model = "gpt-4"
         ),
+        AIProvider.OpenRouter to APIConfig(
+            apiUrl = "https://openrouter.ai/api/v1/chat/completions",
+            model = "openai/gpt-4o-mini"
+        ),
         AIProvider.Claude to APIConfig(
             apiUrl = "https://api.anthropic.com/v1/messages",
             model = "claude-3-opus-20240229"
@@ -107,6 +129,11 @@ class ConfigManager private constructor(private val context: Context) {
             model = "doubao-seed-1-8-251228"
         ),
         AIProvider.Custom to APIConfig()
+    )
+
+    private val defaultEmbeddingConfig = EmbeddingConfig(
+        apiUrl = "https://openrouter.ai/api/v1/embeddings",
+        model = "text-embedding-3-large"
     )
 
     /**
@@ -357,6 +384,52 @@ class ConfigManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取向量模型配置
+     */
+    val embeddingConfigFlow: Flow<EmbeddingConfig> = context.dataStore.data.map { preferences ->
+        val configJson = preferences[EMBEDDING_CONFIG]
+        if (configJson != null) {
+            try {
+                json.decodeFromString<EmbeddingConfig>(configJson)
+            } catch (e: Exception) {
+                defaultEmbeddingConfig
+            }
+        } else {
+            defaultEmbeddingConfig
+        }
+    }
+
+    /**
+     * 设置向量模型配置
+     */
+    suspend fun setEmbeddingConfig(config: EmbeddingConfig) {
+        context.dataStore.edit { preferences ->
+            preferences[EMBEDDING_CONFIG] = json.encodeToString(config)
+        }
+    }
+
+    /**
+     * 获取向量模型模式
+     */
+    val embeddingModeFlow: Flow<EmbeddingMode> = context.dataStore.data.map { preferences ->
+        val modeName = preferences[EMBEDDING_MODE] ?: EmbeddingMode.LocalPreferred.name
+        try {
+            EmbeddingMode.valueOf(modeName)
+        } catch (e: IllegalArgumentException) {
+            EmbeddingMode.LocalPreferred
+        }
+    }
+
+    /**
+     * 设置向量模型模式
+     */
+    suspend fun setEmbeddingMode(mode: EmbeddingMode) {
+        context.dataStore.edit { preferences ->
+            preferences[EMBEDDING_MODE] = mode.name
+        }
+    }
+
+    /**
      * 设置文档存储路径
      */
     suspend fun setDocumentStoragePath(path: String) {
@@ -412,5 +485,19 @@ class ConfigManager private constructor(private val context: Context) {
      */
     suspend fun getMultimodalReasoningCustomConfig(): APIConfig {
         return multimodalReasoningCustomConfigFlow.first()
+    }
+
+    /**
+     * 同步获取向量模型配置
+     */
+    suspend fun getEmbeddingConfig(): EmbeddingConfig {
+        return embeddingConfigFlow.first()
+    }
+
+    /**
+     * 同步获取向量模型模式
+     */
+    suspend fun getEmbeddingMode(): EmbeddingMode {
+        return embeddingModeFlow.first()
     }
 }

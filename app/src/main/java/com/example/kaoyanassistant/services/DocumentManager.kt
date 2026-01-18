@@ -59,6 +59,12 @@ class DocumentManager private constructor(private val context: Context) {
         // 默认分类
         private val DEFAULT_CATEGORIES = listOf("数学", "英语", "政治", "专业课", "其他")
 
+        // 限制文本读取长度，避免超大文档导致内存占用过高
+        private const val MAX_TEXT_CHARS = 200_000
+
+        // 索引文件过大时跳过加载，防止启动时内存溢出
+        private const val MAX_INDEX_FILE_BYTES = 5L * 1024 * 1024
+
         fun getInstance(context: Context): DocumentManager {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: DocumentManager(context.applicationContext).also { INSTANCE = it }
@@ -99,13 +105,13 @@ class DocumentManager private constructor(private val context: Context) {
     /**
      * 导入文档
      */
-    suspend fun importDocument(filePath: String, category: String = "其他"): Boolean {
+    suspend fun importDocument(filePath: String, category: String = "其他"): DocumentInfo? {
         return withContext(Dispatchers.IO) {
             try {
                 val sourceFile = File(filePath)
                 if (!sourceFile.exists()) {
                     Logger.error("DocumentManager", "文件不存在: $filePath")
-                    return@withContext false
+                    return@withContext null
                 }
 
                 val id = generateId()
@@ -132,10 +138,10 @@ class DocumentManager private constructor(private val context: Context) {
                 saveIndex()
 
                 Logger.info("DocumentManager", "文档导入成功: ${sourceFile.name}")
-                true
+                docInfo
             } catch (e: Exception) {
                 Logger.error("DocumentManager", "导入文档失败: ${e.message}")
-                false
+                null
             }
         }
     }
@@ -143,14 +149,15 @@ class DocumentManager private constructor(private val context: Context) {
     /**
      * 批量导入文档
      */
-    suspend fun importDocuments(filePaths: List<String>, category: String = "其他"): Boolean {
-        var allSuccess = true
+    suspend fun importDocuments(filePaths: List<String>, category: String = "其他"): List<DocumentInfo> {
+        val imported = mutableListOf<DocumentInfo>()
         filePaths.forEach { path ->
-            if (!importDocument(path, category)) {
-                allSuccess = false
+            val doc = importDocument(path, category)
+            if (doc != null) {
+                imported.add(doc)
             }
         }
-        return allSuccess
+        return imported
     }
 
     /**
@@ -304,12 +311,7 @@ class DocumentManager private constructor(private val context: Context) {
      * 提取纯文本内容
      */
     private fun extractTextContent(file: File): String {
-        return try {
-            file.readText(Charsets.UTF_8)
-        } catch (e: Exception) {
-            Logger.warning("DocumentManager", "读取文本文件失败: ${e.message}")
-            ""
-        }
+        return readTextWithLimit(file, MAX_TEXT_CHARS, appendNotice = true)
     }
 
     /**
@@ -360,6 +362,11 @@ class DocumentManager private constructor(private val context: Context) {
     private fun loadIndex() {
         try {
             if (indexFile.exists()) {
+                if (indexFile.length() > MAX_INDEX_FILE_BYTES) {
+                    Logger.warning("DocumentManager", "索引文件过大，尝试重建索引以避免内存问题")
+                    rebuildIndexFromFiles()
+                    return
+                }
                 val indexData = json.decodeFromString<List<DocumentInfo>>(indexFile.readText())
                 documents.clear()
                 indexData.forEach { doc ->
@@ -372,6 +379,87 @@ class DocumentManager private constructor(private val context: Context) {
             }
         } catch (e: Exception) {
             Logger.error("DocumentManager", "加载索引失败: ${e.message}")
+        }
+    }
+
+    private fun rebuildIndexFromFiles() {
+        documents.clear()
+        val files = documentsDir.listFiles().orEmpty()
+        files.forEach { file ->
+            if (!file.isFile) return@forEach
+            val (docId, originalName) = parseStoredFileName(file.name)
+            val type = detectType(originalName)
+            val content = when (type) {
+                DocumentType.PlainText, DocumentType.Markdown -> readTextWithLimit(file, MAX_TEXT_CHARS, appendNotice = true)
+                DocumentType.PDF -> "[PDF文件: $originalName，内容提取功能待实现]"
+                DocumentType.Word -> "[Word文件: $originalName，内容提取功能待实现]"
+                DocumentType.Image -> "[图片文件: $originalName]"
+                DocumentType.Unknown -> "[未知格式: $originalName]"
+            }
+            documents[docId] = DocumentInfo(
+                id = docId,
+                name = originalName,
+                path = file.absolutePath,
+                type = type,
+                content = content,
+                importTime = file.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis(),
+                size = file.length(),
+                category = "其他"
+            )
+        }
+        updateDocumentsFlow()
+        saveIndex()
+    }
+
+    private fun parseStoredFileName(fileName: String): Pair<String, String> {
+        val separatorIndex = fileName.indexOf('_')
+        if (separatorIndex in 1 until fileName.length - 1) {
+            val id = fileName.substring(0, separatorIndex)
+            val originalName = fileName.substring(separatorIndex + 1)
+            return id to originalName
+        }
+        val fallbackId = fileName.substringBeforeLast('.', fileName).ifBlank { generateId() }
+        return fallbackId to fileName
+    }
+
+    private fun readTextWithLimit(file: File, maxChars: Int, appendNotice: Boolean): String {
+        return try {
+            file.bufferedReader(Charsets.UTF_8).use { reader ->
+                val buffer = CharArray(4096)
+                val builder = StringBuilder()
+                var total = 0
+                var truncated = false
+                while (true) {
+                    val read = reader.read(buffer)
+                    if (read == -1) break
+                    val remaining = maxChars - total
+                    if (remaining <= 0) {
+                        truncated = true
+                        break
+                    }
+                    val toAppend = if (read > remaining) {
+                        truncated = true
+                        remaining
+                    } else {
+                        read
+                    }
+                    if (toAppend > 0) {
+                        builder.append(buffer, 0, toAppend)
+                        total += toAppend
+                    }
+                    if (truncated) break
+                }
+                if (truncated) {
+                    Logger.warning("DocumentManager", "文本内容过长，已截断: ${file.name}")
+                    if (appendNotice) {
+                        builder.append("\n[内容过长，已截断]")
+                    }
+                }
+                builder.toString()
+            }
+        } catch (e: Exception) {
+            Logger.warning("DocumentManager", "读取文本文件失败: ${e.message}")
+            ""
         }
     }
 }

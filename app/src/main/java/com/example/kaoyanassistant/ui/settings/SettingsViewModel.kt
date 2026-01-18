@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.kaoyanassistant.core.AIProvider
 import com.example.kaoyanassistant.core.APIConfig
 import com.example.kaoyanassistant.core.ConfigManager
+import com.example.kaoyanassistant.core.EmbeddingConfig
+import com.example.kaoyanassistant.core.EmbeddingMode
 import com.example.kaoyanassistant.core.MultimodalMode
 import com.example.kaoyanassistant.core.UserInfo
 import com.example.kaoyanassistant.core.UserManager
@@ -24,6 +26,8 @@ data class SettingsUiState(
     val multimodalReasoningProvider: AIProvider = AIProvider.DeepSeek,
     val multimodalVisionCustomConfig: APIConfig = APIConfig(),
     val multimodalReasoningCustomConfig: APIConfig = APIConfig(),
+    val embeddingConfig: EmbeddingConfig = EmbeddingConfig(),
+    val embeddingMode: EmbeddingMode = EmbeddingMode.LocalPreferred,
     val currentUser: UserInfo? = null,
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
@@ -76,6 +80,18 @@ class SettingsViewModel(
         viewModelScope.launch {
             configManager.multimodalReasoningCustomConfigFlow.collect { config ->
                 _uiState.update { it.copy(multimodalReasoningCustomConfig = config) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.embeddingConfigFlow.collect { config ->
+                _uiState.update { it.copy(embeddingConfig = config) }
+            }
+        }
+
+        viewModelScope.launch {
+            configManager.embeddingModeFlow.collect { mode ->
+                _uiState.update { it.copy(embeddingMode = mode) }
             }
         }
 
@@ -161,6 +177,24 @@ class SettingsViewModel(
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message, isSaving = false) }
             }
+        }
+    }
+
+    fun updateEmbeddingConfig(config: EmbeddingConfig) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+            try {
+                configManager.setEmbeddingConfig(config)
+                _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message, isSaving = false) }
+            }
+        }
+    }
+
+    fun setEmbeddingMode(mode: EmbeddingMode) {
+        viewModelScope.launch {
+            configManager.setEmbeddingMode(mode)
         }
     }
 
@@ -251,6 +285,7 @@ class SettingsViewModel(
     fun getProviderDisplayName(provider: AIProvider): String {
         return when (provider) {
             AIProvider.OpenAI -> "OpenAI"
+            AIProvider.OpenRouter -> "OpenRouter"
             AIProvider.Claude -> "Claude"
             AIProvider.DeepSeek -> "DeepSeek"
             AIProvider.Qwen -> "通义千问"

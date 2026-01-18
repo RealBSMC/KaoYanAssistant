@@ -57,6 +57,41 @@ object ImageUtils {
     }
 
     /**
+     * 将Bitmap转换为Base64编码字符串
+     */
+    fun bitmapToBase64(
+        bitmap: Bitmap,
+        maxSize: Int = 1024,
+        quality: Int = 85
+    ): String? {
+        return try {
+            val resizedBitmap = resizeBitmap(bitmap, maxSize)
+            val byteArrayOutputStream = ByteArrayOutputStream()
+            resizedBitmap.compress(Bitmap.CompressFormat.JPEG, quality, byteArrayOutputStream)
+            val byteArray = byteArrayOutputStream.toByteArray()
+            if (resizedBitmap != bitmap) {
+                resizedBitmap.recycle()
+            }
+            Base64.encodeToString(byteArray, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Logger.error("ImageUtils", "Bitmap转Base64失败: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 从文件读取Bitmap
+     */
+    fun decodeBitmap(file: java.io.File): Bitmap? {
+        return try {
+            BitmapFactory.decodeFile(file.absolutePath)
+        } catch (e: Exception) {
+            Logger.error("ImageUtils", "读取Bitmap失败: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * 调整图片尺寸，保持宽高比
      * @param bitmap 原始图片
      * @param maxSize 最大尺寸（宽或高）

@@ -5,6 +5,7 @@ import com.example.kaoyanassistant.core.ConfigManager
 import com.example.kaoyanassistant.core.UserManager
 import com.example.kaoyanassistant.core.StudyPlanManager
 import com.example.kaoyanassistant.services.DocumentManager
+import com.example.kaoyanassistant.services.RagIndexManager
 import com.example.kaoyanassistant.utils.Logger
 import java.io.File
 
@@ -18,6 +19,9 @@ class KaoyanApplication : Application() {
         private set
 
     lateinit var documentManager: DocumentManager
+        private set
+
+    lateinit var ragIndexManager: RagIndexManager
         private set
 
     lateinit var userManager: UserManager
@@ -39,6 +43,9 @@ class KaoyanApplication : Application() {
 
         // 初始化文档管理器
         documentManager = DocumentManager.getInstance(this)
+
+        // 初始化RAG索引管理器
+        ragIndexManager = RagIndexManager(this, configManager)
 
         // 初始化用户管理器
         userManager = UserManager.getInstance(this)

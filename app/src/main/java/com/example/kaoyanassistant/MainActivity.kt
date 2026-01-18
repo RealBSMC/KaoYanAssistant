@@ -17,10 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.kaoyanassistant.ui.chat.ChatScreen
 import com.example.kaoyanassistant.ui.chat.ChatViewModel
 import com.example.kaoyanassistant.ui.document.DocumentScreen
@@ -30,6 +32,8 @@ import com.example.kaoyanassistant.ui.login.LoginViewModel
 import com.example.kaoyanassistant.ui.school.SchoolSelectionScreen
 import com.example.kaoyanassistant.ui.school.SchoolSelectionViewModel
 import com.example.kaoyanassistant.ui.settings.SettingsScreen
+import com.example.kaoyanassistant.ui.settings.EmbeddingConfigScreen
+import com.example.kaoyanassistant.ui.settings.ProviderConfigScreen
 import com.example.kaoyanassistant.ui.settings.SettingsViewModel
 import com.example.kaoyanassistant.ui.studyplan.StudyPlanScreen
 import com.example.kaoyanassistant.ui.studyplan.StudyPlanViewModel
@@ -45,6 +49,10 @@ sealed class Screen(val route: String, val title: String, val icon: @Composable 
     object StudyPlan : Screen("study_plan", "计划", { Icon(Icons.Default.CalendarMonth, contentDescription = null) })
     object Documents : Screen("documents", "资料", { Icon(Icons.Default.Description, contentDescription = null) })
     object Settings : Screen("settings", "设置", { Icon(Icons.Default.Settings, contentDescription = null) })
+    object ProviderConfig : Screen("settings/provider/{target}", "配置", { Icon(Icons.Default.Settings, contentDescription = null) }) {
+        fun createRoute(target: String): String = "settings/provider/$target"
+    }
+    object EmbeddingConfig : Screen("settings/embedding", "向量模型配置", { Icon(Icons.Default.Settings, contentDescription = null) })
 }
 
 // 底部导航栏显示的页面
@@ -102,10 +110,10 @@ fun MainNavigation(app: KaoyanApplication) {
         factory = LoginViewModel.Factory(app.userManager)
     )
     val chatViewModel: ChatViewModel = viewModel(
-        factory = ChatViewModel.Factory(app.configManager, app.documentManager, context)
+        factory = ChatViewModel.Factory(app.configManager, app.documentManager, app.ragIndexManager, context)
     )
     val documentViewModel: DocumentViewModel = viewModel(
-        factory = DocumentViewModel.Factory(app.documentManager)
+        factory = DocumentViewModel.Factory(app.applicationContext, app.documentManager, app.ragIndexManager)
     )
     val settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(app.configManager, app.userManager)
@@ -236,10 +244,39 @@ fun MainNavigation(app: KaoyanApplication) {
                     onNavigateBack = {
                         navController.popBackStack()
                     },
+                    onNavigateToProviderConfig = { target ->
+                        navController.navigate(Screen.ProviderConfig.createRoute(target))
+                    },
+                    onNavigateToEmbeddingConfig = {
+                        navController.navigate(Screen.EmbeddingConfig.route)
+                    },
                     onLogout = {
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }
                         }
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.ProviderConfig.route,
+                arguments = listOf(navArgument("target") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val target = backStackEntry.arguments?.getString("target") ?: return@composable
+                ProviderConfigScreen(
+                    viewModel = settingsViewModel,
+                    target = target,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            composable(Screen.EmbeddingConfig.route) {
+                EmbeddingConfigScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = {
+                        navController.popBackStack()
                     }
                 )
             }

@@ -2,6 +2,8 @@ package com.example.kaoyanassistant.ui.chat
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,6 +15,8 @@ import com.example.kaoyanassistant.core.MultimodalMode
 import com.example.kaoyanassistant.services.AIResponseState
 import com.example.kaoyanassistant.services.AIService
 import com.example.kaoyanassistant.services.DocumentManager
+import com.example.kaoyanassistant.services.RagIndexManager
+import com.example.kaoyanassistant.services.RagMatch
 import com.example.kaoyanassistant.services.Message
 import com.example.kaoyanassistant.services.MessageRole
 import com.example.kaoyanassistant.utils.ImageUtils
@@ -49,9 +53,11 @@ data class ChatUiState(
  * 聊天界面ViewModel
  * 对应Qt版本的ChatWidget逻辑
  */
+@RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
 class ChatViewModel(
     private val configManager: ConfigManager,
     private val documentManager: DocumentManager,
+    private val ragIndexManager: RagIndexManager,
     private val context: Context
 ) : ViewModel() {
 
@@ -151,6 +157,7 @@ class ChatViewModel(
     /**
      * 处理AI响应
      */
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     private fun handleAIResponse(state: AIResponseState) {
         when (state) {
             is AIResponseState.Idle -> {
@@ -341,11 +348,9 @@ class ChatViewModel(
         addMessageToUI(aiMessage)
 
         val documentContents = try {
-            documentManager.getSelectedDocumentsContent(
-                _uiState.value.selectedDocumentIds
-            )
+            buildRagContext(messageContent)
         } catch (e: Exception) {
-            Logger.warning("ChatViewModel", "获取文档内容失败: ${e.message}")
+            Logger.warning("ChatViewModel", "获取RAG内容失败: ${e.message}")
             emptyList()
         }
 
@@ -355,9 +360,17 @@ class ChatViewModel(
             conversationHistory.dropLast(1)
         }
 
+        if (_uiState.value.selectedDocumentIds.isNotEmpty() && documentContents.isEmpty()) {
+            _uiState.update { it.copy(error = "未检索到相关资料，请先完成文档索引") }
+            _uiState.update { it.copy(isLoading = false) }
+            return
+        }
+
         if (documentContents.isNotEmpty()) {
+            val groundedMessage = buildGroundedMessage(messageForHistory.content)
+            val messageForRequest = messageForHistory.copy(content = groundedMessage)
             aiService.sendMessageWithDocuments(
-                messageForHistory,
+                messageForRequest,
                 documentContents,
                 contextForRequest,
                 config,
@@ -448,19 +461,25 @@ class ChatViewModel(
         addMessageToUI(aiMessage)
 
         val documentContents = try {
-            documentManager.getSelectedDocumentsContent(
-                _uiState.value.selectedDocumentIds
-            )
+            buildRagContext(messageContent)
         } catch (e: Exception) {
-            Logger.warning("ChatViewModel", "获取文档内容失败: ${e.message}")
+            Logger.warning("ChatViewModel", "获取RAG内容失败: ${e.message}")
             emptyList()
         }
 
         val contextForRequest = sanitizeContextForTextProvider(conversationHistory.dropLast(1))
 
+        if (_uiState.value.selectedDocumentIds.isNotEmpty() && documentContents.isEmpty()) {
+            _uiState.update { it.copy(error = "未检索到相关资料，请先完成文档索引") }
+            _uiState.update { it.copy(isLoading = false) }
+            return
+        }
+
         if (documentContents.isNotEmpty()) {
+            val groundedMessage = buildGroundedMessage(messageContent)
+            val messageForRequest = messageForHistory.copy(content = groundedMessage)
             aiService.sendMessageWithDocuments(
-                messageForHistory,
+                messageForRequest,
                 documentContents,
                 contextForRequest,
                 reasoningConfig,
@@ -521,6 +540,10 @@ class ChatViewModel(
         }
     }
 
+    private fun buildGroundedMessage(userText: String): String {
+        return "请严格依据参考资料回答，若资料中没有答案请说明无法从资料中得出。\n\n$userText"
+    }
+
     private fun sanitizeContextForTextProvider(messages: List<Message>): List<Message> {
         return messages.map { message ->
             if (message.imageBase64 != null || message.imageMimeType != null) {
@@ -536,6 +559,32 @@ class ChatViewModel(
         }
     }
 
+    private suspend fun buildRagContext(query: String): List<String> {
+        val selectedIds = _uiState.value.selectedDocumentIds
+        if (selectedIds.isEmpty()) return emptyList()
+
+        val indexedIds = selectedIds.filter { ragIndexManager.isIndexed(it) }
+        val missingIds = selectedIds - indexedIds.toSet()
+        if (missingIds.isNotEmpty()) {
+            _uiState.update { it.copy(error = "部分文档未完成索引，将忽略未索引文档") }
+        }
+        if (indexedIds.isEmpty()) return emptyList()
+
+        val matches = ragIndexManager.search(query, indexedIds, topK = 4)
+        return matches.map { formatRagChunk(it) }
+    }
+
+    private fun formatRagChunk(match: RagMatch): String {
+        val docName = documentManager.getDocument(match.chunk.docId)?.name ?: match.chunk.docId
+        val pageInfo = match.chunk.pageStart?.let { "第${it}页" }
+        val header = if (pageInfo != null) {
+            "来源: $docName ($pageInfo)"
+        } else {
+            "来源: $docName"
+        }
+        return "$header\n${match.chunk.text}"
+    }
+
     private suspend fun loadProviderConfig(provider: AIProvider, role: ModelRole): APIConfig {
         if (provider != AIProvider.Custom) {
             return configManager.getAPIConfigFlow(provider).first()
@@ -544,7 +593,7 @@ class ChatViewModel(
         return when (role) {
             ModelRole.Vision -> configManager.getMultimodalVisionCustomConfig()
             ModelRole.Reasoning -> configManager.getMultimodalReasoningCustomConfig()
-            ModelRole.Single -> configManager.getAPIConfigFlow(provider).first()
+            ModelRole.Single -> configManager.getMultimodalReasoningCustomConfig()
         }
     }
 
@@ -575,6 +624,7 @@ class ChatViewModel(
     private fun getProviderDisplayName(provider: AIProvider): String {
         return when (provider) {
             AIProvider.OpenAI -> "OpenAI"
+            AIProvider.OpenRouter -> "OpenRouter"
             AIProvider.Claude -> "Claude"
             AIProvider.DeepSeek -> "DeepSeek"
             AIProvider.Qwen -> "通义千问"
@@ -586,11 +636,12 @@ class ChatViewModel(
     class Factory(
         private val configManager: ConfigManager,
         private val documentManager: DocumentManager,
+        private val ragIndexManager: RagIndexManager,
         private val context: Context
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(configManager, documentManager, context) as T
+            return ChatViewModel(configManager, documentManager, ragIndexManager, context) as T
         }
     }
 }

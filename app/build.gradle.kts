@@ -19,6 +19,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -40,6 +44,16 @@ android {
     buildFeatures {
         compose = true
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    androidResources {
+        noCompress += "gguf"
+    }
 }
 
 dependencies {
@@ -55,6 +69,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
+    implementation(libs.androidx.compose.foundation)
 
     // Navigation
     implementation(libs.navigation.compose)
@@ -84,6 +99,7 @@ dependencies {
     // Markdown渲染
     implementation(libs.markwon.core)
     implementation(libs.markwon.html)
+    implementation(libs.androidx.work.runtime.ktx)
 
     // 测试
     testImplementation(libs.junit)

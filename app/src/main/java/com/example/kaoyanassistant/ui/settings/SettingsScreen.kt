@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -32,14 +33,16 @@ import com.example.kaoyanassistant.core.UserInfo
 fun SettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
+    onNavigateToProviderConfig: (String) -> Unit,
+    onNavigateToEmbeddingConfig: () -> Unit,
     onLogout: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var selectedProvider by remember { mutableStateOf(uiState.currentProvider) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showUserInfoDialog by remember { mutableStateOf(false) }
     var showVisionProviderMenu by remember { mutableStateOf(false) }
     var showReasoningProviderMenu by remember { mutableStateOf(false) }
+    var showCurrentProviderMenu by remember { mutableStateOf(false) }
 
     // 保存成功提示
     LaunchedEffect(uiState.saveSuccess) {
@@ -86,7 +89,7 @@ fun SettingsScreen(
                 )
             }
 
-            // AI服务商选择
+            // 当前模型
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth()
@@ -95,39 +98,26 @@ fun SettingsScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            text = "AI服务商",
+                            text = "当前模型",
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        AIProvider.entries.forEach { provider ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        selectedProvider = provider
-                                        viewModel.setCurrentProvider(provider)
-                                    }
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                        Box {
+                            OutlinedButton(onClick = { showCurrentProviderMenu = true }) {
+                                Text(viewModel.getProviderDisplayName(uiState.currentProvider))
+                            }
+                            DropdownMenu(
+                                expanded = showCurrentProviderMenu,
+                                onDismissRequest = { showCurrentProviderMenu = false }
                             ) {
-                                RadioButton(
-                                    selected = uiState.currentProvider == provider,
-                                    onClick = {
-                                        selectedProvider = provider
-                                        viewModel.setCurrentProvider(provider)
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = viewModel.getProviderDisplayName(provider),
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                    Text(
-                                        text = getProviderDescription(provider),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                AIProvider.entries.forEach { provider ->
+                                    DropdownMenuItem(
+                                        text = { Text(viewModel.getProviderDisplayName(provider)) },
+                                        onClick = {
+                                            showCurrentProviderMenu = false
+                                            viewModel.setCurrentProvider(provider)
+                                        }
                                     )
                                 }
                             }
@@ -268,7 +258,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = "提示：请确保图片模型与推理模型都已在上方配置好API信息。",
+                                text = "提示：请确保图片模型与推理模型都已在下方配置好API信息。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                             )
@@ -277,52 +267,7 @@ fun SettingsScreen(
                 }
             }
 
-            if (uiState.multimodalMode == MultimodalMode.Split &&
-                uiState.multimodalVisionProvider == AIProvider.Custom
-            ) {
-                item {
-                    APIConfigCard(
-                        provider = AIProvider.Custom,
-                        config = uiState.multimodalVisionCustomConfig,
-                        providerName = "图片模型(自定义)",
-                        onSave = { config ->
-                            viewModel.updateMultimodalVisionCustomConfig(config)
-                        },
-                        isSaving = uiState.isSaving
-                    )
-                }
-            }
-
-            if (uiState.multimodalMode == MultimodalMode.Split &&
-                uiState.multimodalReasoningProvider == AIProvider.Custom
-            ) {
-                item {
-                    APIConfigCard(
-                        provider = AIProvider.Custom,
-                        config = uiState.multimodalReasoningCustomConfig,
-                        providerName = "推理模型(自定义)",
-                        onSave = { config ->
-                            viewModel.updateMultimodalReasoningCustomConfig(config)
-                        },
-                        isSaving = uiState.isSaving
-                    )
-                }
-            }
-
-            // API配置
-            item {
-                APIConfigCard(
-                    provider = selectedProvider,
-                    config = uiState.apiConfigs[selectedProvider] ?: APIConfig(),
-                    providerName = viewModel.getProviderDisplayName(selectedProvider),
-                    onSave = { config ->
-                        viewModel.updateAPIConfig(selectedProvider, config)
-                    },
-                    isSaving = uiState.isSaving
-                )
-            }
-
-            // 高级设置
+            // AI服务商配置
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth()
@@ -331,49 +276,75 @@ fun SettingsScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            text = "高级设置",
+                            text = "AI服务商配置",
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        val config = uiState.apiConfigs[selectedProvider] ?: APIConfig()
-                        var maxTokens by remember(config) { mutableStateOf(config.maxContextTokens.toString()) }
-                        var keepRecent by remember(config) { mutableStateOf(config.keepRecentMessages.toString()) }
-
-                        OutlinedTextField(
-                            value = maxTokens,
-                            onValueChange = { maxTokens = it },
-                            label = { Text("最大上下文Token数") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            supportingText = { Text("建议值：4000-32000") }
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = keepRecent,
-                            onValueChange = { keepRecent = it },
-                            label = { Text("压缩时保留消息数") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            supportingText = { Text("上下文压缩时保留最近的消息数量") }
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Button(
-                            onClick = {
-                                val newConfig = config.copy(
-                                    maxContextTokens = maxTokens.toIntOrNull() ?: 8000,
-                                    keepRecentMessages = keepRecent.toIntOrNull() ?: 10
+                        val providerItems = AIProvider.entries
+                            .filter { it != AIProvider.Custom }
+                            .map { provider ->
+                                ProviderConfigItem(
+                                    title = viewModel.getProviderDisplayName(provider),
+                                    target = provider.name
                                 )
-                                viewModel.updateAPIConfig(selectedProvider, newConfig)
-                            },
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Text("保存高级设置")
+                            } + listOf(
+                            ProviderConfigItem(
+                                title = "推理自定义",
+                                target = ProviderConfigTargets.CustomReasoning
+                            ),
+                            ProviderConfigItem(
+                                title = "图像自定义",
+                                target = ProviderConfigTargets.CustomVision
+                            )
+                        )
+
+                        providerItems.forEachIndexed { index, item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onNavigateToProviderConfig(item.target) }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null
+                                )
+                            }
+                            if (index != providerItems.lastIndex) {
+                                HorizontalDivider()
+                            }
                         }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onNavigateToEmbeddingConfig() }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "向量模型配置",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null
+                        )
                     }
                 }
             }
@@ -450,6 +421,11 @@ fun SettingsScreen(
         )
     }
 }
+
+private data class ProviderConfigItem(
+    val title: String,
+    val target: String
+)
 
 /**
  * 用户信息卡片
@@ -780,20 +756,10 @@ fun APIConfigCard(
     }
 }
 
-private fun getProviderDescription(provider: AIProvider): String {
-    return when (provider) {
-        AIProvider.OpenAI -> "GPT-4, GPT-3.5等模型"
-        AIProvider.Claude -> "Claude 3 Opus, Sonnet等模型"
-        AIProvider.DeepSeek -> "DeepSeek Chat, DeepSeek Coder"
-        AIProvider.Qwen -> "通义千问系列模型"
-        AIProvider.Doubao -> "豆包系列模型"
-        AIProvider.Custom -> "自定义OpenAI兼容API"
-    }
-}
-
 private fun getDefaultApiUrl(provider: AIProvider): String {
     return when (provider) {
         AIProvider.OpenAI -> "https://api.openai.com/v1/chat/completions"
+        AIProvider.OpenRouter -> "https://openrouter.ai/api/v1/chat/completions"
         AIProvider.Claude -> "https://api.anthropic.com/v1/messages"
         AIProvider.DeepSeek -> "https://api.deepseek.com/v1/chat/completions"
         AIProvider.Qwen -> "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -805,10 +771,11 @@ private fun getDefaultApiUrl(provider: AIProvider): String {
 private fun getDefaultModel(provider: AIProvider): String {
     return when (provider) {
         AIProvider.OpenAI -> "gpt-4"
+        AIProvider.OpenRouter -> "openai/gpt-4o-mini"
         AIProvider.Claude -> "claude-3-opus-20240229"
         AIProvider.DeepSeek -> "deepseek-chat"
         AIProvider.Qwen -> "qwen-turbo"
-        AIProvider.Doubao -> "doubao-pro-32k"
+        AIProvider.Doubao -> "doubao-seed-1-8-251228"
         AIProvider.Custom -> ""
     }
 }
@@ -816,6 +783,7 @@ private fun getDefaultModel(provider: AIProvider): String {
 private fun getModelHint(provider: AIProvider): String {
     return when (provider) {
         AIProvider.OpenAI -> "可选: gpt-4, gpt-4-turbo, gpt-3.5-turbo"
+        AIProvider.OpenRouter -> "可选: openai/gpt-4o-mini, deepseek/deepseek-chat, anthropic/claude-3.5-sonnet"
         AIProvider.Claude -> "可选: claude-3-opus, claude-3-sonnet, claude-3-haiku"
         AIProvider.DeepSeek -> "可选: deepseek-chat, deepseek-reasoner"
         AIProvider.Qwen -> "可选: qwen-turbo, qwen-plus, qwen-max"
